@@ -215,6 +215,10 @@ h1 {
     .page-header {
         padding: calc(var(--design-unit) * 1.5px) calc(var(--design-unit) * 3.5px);
     }
+
+    .logo::part(control) {
+        padding-left: calc(var(--design-unit) * 3.5px);
+    }
  }
 
 .datagrid-overflow-area,
