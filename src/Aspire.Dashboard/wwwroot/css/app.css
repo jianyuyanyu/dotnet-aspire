@@ -250,8 +250,9 @@ fluent-data-grid .loading-content-cell .stack-horizontal {
 }
 
 .top-messagebar {
-    padding: calc(var(--design-unit) * 2px);
-    padding-bottom: 0;
+    padding: calc(var(--design-unit) * 3px);
+    padding-top: calc(var(--design-unit) * 2px);
+    padding-bottom: 0 !important;
 }
 
 .fluent-messagebar.intent-warning {
