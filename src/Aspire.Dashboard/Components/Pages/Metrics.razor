@@ -27,7 +27,7 @@
                             @bind-SelectedResource="PageViewModel.SelectedApplication"
                             @bind-SelectedResource:after="HandleSelectedApplicationChangedAsync"
                             CanSelectGrouping="true"
-                            LabelClass="toolbar-left-label" />
+                            LabelClass="toolbar-left" />
             @if (!ViewportInformation.IsDesktop)
             {
                 <FluentIcon slot="end" Icon="Icons.Regular.Size20.Clock" Style="margin-right:5px;"/>

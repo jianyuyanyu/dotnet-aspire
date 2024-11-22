@@ -20,7 +20,7 @@
                             AriaLabel="@ControlsStringsLoc[nameof(ControlsStrings.ResourceLabel)]"
                             @bind-SelectedResource="PageViewModel.SelectedOption"
                             @bind-SelectedResource:after="HandleSelectedOptionChangedAsync"
-                            LabelClass="toolbar-left-label" />
+                            LabelClass="toolbar-left" />
             @if (ViewportInformation.IsDesktop)
             {
                 // This takes up too much horizontal space on mobile, so show on a new line on mobile
