@@ -687,7 +687,7 @@ fluent-data-grid-cell.no-ellipsis {
 
 .main-grid-expand-container {
     display: inline-block;
-    width: 20px;
+    width: 18px;
 }
 
 .main-grid-expand-container svg {
@@ -704,9 +704,9 @@ fluent-data-grid-cell.no-ellipsis {
 }
 
 .main-grid-expand-button {
-    width: 20px;
+    width: 18px;
     height: 24px;
-    min-width: 20px;
+    min-width: 18px;
     vertical-align: middle;
 }
 
