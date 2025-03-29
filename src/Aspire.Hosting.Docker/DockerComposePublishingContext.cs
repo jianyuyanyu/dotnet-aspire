@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+#pragma warning disable ASPIREPUBLISHERS001
+
 using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Docker.Resources;
@@ -22,9 +24,12 @@ namespace Aspire.Hosting.Docker;
 internal sealed class DockerComposePublishingContext(
     DistributedApplicationExecutionContext executionContext,
     DockerComposePublisherOptions publisherOptions,
+    IResourceContainerImageBuilder imageBuilder,
     ILogger logger,
     CancellationToken cancellationToken = default)
 {
+    public readonly IResourceContainerImageBuilder ImageBuilder = imageBuilder;
+
     public readonly PortAllocator PortAllocator = new();
     private readonly Dictionary<string, (string Description, string? DefaultValue)> _env = [];
     private readonly Dictionary<IResource, ComposeServiceContext> _composeServices = [];
@@ -33,8 +38,9 @@ internal sealed class DockerComposePublishingContext(
 
     internal async Task WriteModelAsync(DistributedApplicationModel model)
     {
-        if (executionContext.IsRunMode)
+        if (!executionContext.IsPublishMode)
         {
+            logger.NotInPublishingMode();
             return;
         }
 
@@ -85,7 +91,7 @@ internal sealed class DockerComposePublishingContext(
 
             var composeServiceContext = await ProcessResourceAsync(resource).ConfigureAwait(false);
 
-            var composeService = composeServiceContext.BuildComposeService();
+            var composeService = await composeServiceContext.BuildComposeServiceAsync(cancellationToken).ConfigureAwait(false);
 
             HandleComposeFileVolumes(composeServiceContext, composeFile);
 
@@ -174,8 +180,10 @@ internal sealed class DockerComposePublishingContext(
         private List<string> Commands { get; } = [];
         public List<Volume> Volumes { get; } = [];
 
-        public Service BuildComposeService()
+        public async Task<Service> BuildComposeServiceAsync(CancellationToken cancellationToken)
         {
+            await composePublishingContext.ImageBuilder.BuildImageAsync(resource, cancellationToken).ConfigureAwait(false);
+
             if (!TryGetContainerImageName(resource, out var containerImageName))
             {
                 composePublishingContext.Logger.FailedToGetContainerImage(resource.Name);
@@ -193,6 +201,25 @@ internal sealed class DockerComposePublishingContext(
             SetContainerImage(containerImageName, composeService);
 
             return composeService;
+        }
+
+        private bool TryGetContainerImageName(IResource resourceInstance, out string? containerImageName)
+        {
+            // If the resource has a Dockerfile build annotation, we don't have the image name
+            // it will come as a parameter
+            if (resourceInstance.TryGetLastAnnotation<DockerfileBuildAnnotation>(out _) || resourceInstance is ProjectResource)
+            {
+                var imageEnvName = $"{resourceInstance.Name.ToUpperInvariant().Replace("-", "_")}_IMAGE";
+
+                composePublishingContext.AddEnv(imageEnvName,
+                                                $"Container image name for {resourceInstance.Name}",
+                                                $"{resourceInstance.Name}:latest");
+
+                containerImageName = $"${{{imageEnvName}}}";
+                return false;
+            }
+
+            return resourceInstance.TryGetContainerImageName(out containerImageName);
         }
 
         private void AddVolumes(Service composeService)
@@ -230,25 +257,6 @@ internal sealed class DockerComposePublishingContext(
             {
                 composeService.Image = containerImageName;
             }
-        }
-
-        private bool TryGetContainerImageName(IResource resourceInstance, out string? containerImageName)
-        {
-            // If the resource has a Dockerfile build annotation, we don't have the image name
-            // it will come as a parameter
-            if (resourceInstance.TryGetLastAnnotation<DockerfileBuildAnnotation>(out _) || resourceInstance is ProjectResource)
-            {
-                var imageEnvName = $"{resourceInstance.Name.ToUpperInvariant().Replace("-", "_")}_IMAGE";
-
-                composePublishingContext.AddEnv(imageEnvName,
-                                                $"Container image name for {resourceInstance.Name}",
-                                                $"{resourceInstance.Name}:latest");
-
-                containerImageName = $"${{{imageEnvName}}}";
-                return false;
-            }
-
-            return resourceInstance.TryGetContainerImageName(out containerImageName);
         }
 
         public async Task ProcessResourceAsync(DistributedApplicationExecutionContext executionContext, CancellationToken cancellationToken)
@@ -308,12 +316,14 @@ internal sealed class DockerComposePublishingContext(
         {
             if (resource.TryGetAnnotationsOfType<EnvironmentCallbackAnnotation>(out var environmentCallbacks))
             {
-                var context = new EnvironmentCallbackContext(executionContext, cancellationToken: cancellationToken);
+                var context = new EnvironmentCallbackContext(executionContext, resource, cancellationToken: cancellationToken);
 
                 foreach (var c in environmentCallbacks)
                 {
                     await c.Callback(context).ConfigureAwait(false);
                 }
+
+                RemoveHttpsServiceDiscoveryVariables(context.EnvironmentVariables);
 
                 foreach (var kv in context.EnvironmentVariables)
                 {
@@ -323,6 +333,23 @@ internal sealed class DockerComposePublishingContext(
                 }
             }
         }
+
+        private static void RemoveHttpsServiceDiscoveryVariables(Dictionary<string, object> environmentVariables)
+        {
+            // HACK: At the moment Docker Compose doesn't do anything with setting up certificates so
+            //       we need to remove the https service discovery variables.
+
+            var keysToRemove = environmentVariables
+                .Where(kvp => kvp.Value is EndpointReference epRef && epRef.Scheme == "https" && kvp.Key.StartsWith("services__"))
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in keysToRemove)
+            {
+                environmentVariables.Remove(key);
+            }
+        }
+
         private void ProcessVolumes()
         {
             if (!resource.TryGetContainerMounts(out var mounts))
@@ -352,7 +379,7 @@ internal sealed class DockerComposePublishingContext(
 
         private static string GetValue(EndpointMapping mapping, EndpointProperty property)
         {
-            var (scheme, host, internalPort, exposedPort, isHttpIngress) = mapping;
+            var (scheme, host, internalPort, _, isHttpIngress) = mapping;
 
             return property switch
             {
@@ -360,7 +387,7 @@ internal sealed class DockerComposePublishingContext(
                 EndpointProperty.Host or EndpointProperty.IPV4Host => GetHostValue(),
                 EndpointProperty.Port => internalPort.ToString(CultureInfo.InvariantCulture),
                 EndpointProperty.HostAndPort => GetHostValue(suffix: $":{internalPort}"),
-                EndpointProperty.TargetPort => $"{exposedPort}",
+                EndpointProperty.TargetPort => $"{internalPort}",
                 EndpointProperty.Scheme => scheme,
                 _ => throw new NotSupportedException(),
             };

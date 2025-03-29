@@ -19,7 +19,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Aspire.Hosting.Devcontainers;
-using Aspire.Hosting.Cli;
 
 namespace Aspire.Hosting.Dashboard;
 
@@ -36,8 +35,7 @@ internal sealed class DashboardLifecycleHook(IConfiguration configuration,
                                              CodespacesUrlRewriter codespaceUrlRewriter,
                                              IOptions<CodespacesOptions> codespacesOptions,
                                              IOptions<DevcontainersOptions> devcontainersOptions,
-                                             DevcontainerSettingsWriter settingsWriter,
-                                             CliBackchannel cliBackchannel
+                                             DevcontainerSettingsWriter settingsWriter
                                              ) : IDistributedApplicationLifecycleHook, IAsyncDisposable
 {
     private Task? _dashboardLogsTask;
@@ -157,7 +155,7 @@ internal sealed class DashboardLifecycleHook(IConfiguration configuration,
             }
         }
 
-        var snapshot = new CustomResourceSnapshot()
+        var snapshot = new CustomResourceSnapshot
         {
             Properties = [],
             ResourceType = dashboardResource switch
@@ -167,7 +165,9 @@ internal sealed class DashboardLifecycleHook(IConfiguration configuration,
                 ContainerResource => KnownResourceTypes.Container,
                 _ => dashboardResource.GetType().Name
             },
-            State = configuration.GetBool("DOTNET_ASPIRE_SHOW_DASHBOARD_RESOURCES") is true ? null : KnownResourceStates.Hidden
+            State = configuration.GetBool(KnownConfigNames.ShowDashboardResources, KnownConfigNames.Legacy.ShowDashboardResources) is true
+                ? null
+                : KnownResourceStates.Hidden
         };
 
         dashboardResource.Annotations.Add(new ResourceSnapshotAnnotation(snapshot));
@@ -203,7 +203,7 @@ internal sealed class DashboardLifecycleHook(IConfiguration configuration,
                 context.EnvironmentVariables[DashboardConfigNames.DashboardOtlpHttpUrlName.EnvVarName] = otlpHttpEndpointUrl;
 
                 // Use explicitly defined allowed origins if configured.
-                var allowedOrigins = configuration[KnownConfigNames.DashboardCorsAllowedOrigins];
+                var allowedOrigins = configuration.GetString(KnownConfigNames.DashboardCorsAllowedOrigins, KnownConfigNames.Legacy.DashboardCorsAllowedOrigins);
 
                 // If allowed origins are not configured then calculate allowed origins from endpoints.
                 if (string.IsNullOrEmpty(allowedOrigins))
@@ -263,7 +263,6 @@ internal sealed class DashboardLifecycleHook(IConfiguration configuration,
             }
 
             var dashboardUrl = codespaceUrlRewriter.RewriteUrl(firstDashboardUrl.ToString());
-            cliBackchannel.SetDashboardUrls(firstDashboardUrl.ToString(), browserToken);
 
             distributedApplicationLogger.LogInformation("Now listening on: {DashboardUrl}", dashboardUrl.TrimEnd('/'));
 
