@@ -2,7 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Data;
-using Aspire.Components.Common.Tests;
+using Aspire.TestUtilities;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Tests.Utils;
 using Aspire.Hosting.Utils;
@@ -16,7 +16,6 @@ using Microsoft.Extensions.Hosting;
 using MySqlConnector;
 using Polly;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Aspire.Hosting.MySql.Tests;
 
@@ -378,6 +377,7 @@ public class MySqlFunctionalTests(ITestOutputHelper testOutputHelper)
 
     [Fact]
     [RequiresDocker]
+    [QuarantinedTest("https://github.com/dotnet/aspire/issues/7340")]
     public async Task VerifyEfMySql()
     {
         var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));

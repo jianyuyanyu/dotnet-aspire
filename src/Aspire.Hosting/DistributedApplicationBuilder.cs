@@ -1,11 +1,14 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+#pragma warning disable ASPIREPUBLISHERS001
+
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.Backchannel;
 using Aspire.Hosting.Cli;
 using Aspire.Hosting.Dashboard;
 using Aspire.Hosting.Dcp;
@@ -127,7 +130,8 @@ public class DistributedApplicationBuilder : IDistributedApplicationBuilder
         {
             DistributedApplicationOperation.Run => new DistributedApplicationExecutionContextOptions(operation),
             DistributedApplicationOperation.Inspect => new DistributedApplicationExecutionContextOptions(operation),
-            _ => new DistributedApplicationExecutionContextOptions(operation, _innerBuilder.Configuration["Publishing:Publisher"])
+            DistributedApplicationOperation.Publish => new DistributedApplicationExecutionContextOptions(operation, _innerBuilder.Configuration["Publishing:Publisher"] ?? "manifest"),
+            _ => throw new DistributedApplicationException("Invalid operation specified. Valid operations are 'publish', 'inspect', or 'run'.")
         };
     }
 
@@ -250,10 +254,15 @@ public class DistributedApplicationBuilder : IDistributedApplicationBuilder
             return new AspireStore(Path.Combine(aspireDir, ".aspire"));
         });
 
+        // Shared DCP things (even though DCP isn't used in 'publish' and 'inspect' mode
+        // we still honour the DCP options around container runtime selection.
+        _innerBuilder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<DcpOptions>, ConfigureDefaultDcpOptions>());
+        _innerBuilder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<DcpOptions>, ValidateDcpOptions>());
+
         // Aspire CLI support
         _innerBuilder.Services.AddHostedService<CliOrphanDetector>();
-        _innerBuilder.Services.AddSingleton<CliBackchannel>();
-        _innerBuilder.Services.AddHostedService<CliBackchannel>(sp => sp.GetRequiredService<CliBackchannel>());
+        _innerBuilder.Services.AddSingleton<BackchannelService>();
+        _innerBuilder.Services.AddHostedService<BackchannelService>(sp => sp.GetRequiredService<BackchannelService>());
         _innerBuilder.Services.AddSingleton<AppHostRpcTarget>();
 
         ConfigureHealthChecks();
@@ -273,7 +282,8 @@ public class DistributedApplicationBuilder : IDistributedApplicationBuilder
                     SecretsStore.GetOrSetUserSecret(_innerBuilder.Configuration, AppHostAssembly, "AppHost:OtlpApiKey", TokenGenerator.GenerateToken);
 
                     // Determine the frontend browser token.
-                    if (_innerBuilder.Configuration[KnownConfigNames.DashboardFrontendBrowserToken] is not { Length: > 0 } browserToken)
+                    if (_innerBuilder.Configuration.GetString(KnownConfigNames.DashboardFrontendBrowserToken,
+                                                              KnownConfigNames.Legacy.DashboardFrontendBrowserToken, fallbackOnEmpty: true) is not { } browserToken)
                     {
                         // No browser token was specified in configuration, so generate one.
                         browserToken = TokenGenerator.GenerateToken();
@@ -287,11 +297,11 @@ public class DistributedApplicationBuilder : IDistributedApplicationBuilder
                     );
 
                     // Determine the resource service API key.
-                    if (_innerBuilder.Configuration[KnownConfigNames.DashboardResourceServiceClientApiKey] is not { Length: > 0 } apiKey)
-                    {
-                        // No API key was specified in configuration, so generate one.
-                        apiKey = TokenGenerator.GenerateToken();
-                    }
+                    var apiKey = _innerBuilder.Configuration.GetString(KnownConfigNames.DashboardResourceServiceClientApiKey,
+                                                                       KnownConfigNames.Legacy.DashboardResourceServiceClientApiKey, fallbackOnEmpty: true);
+
+                    // If no API key was specified in configuration, generate one.
+                    apiKey ??= TokenGenerator.GenerateToken();
 
                     _innerBuilder.Configuration.AddInMemoryCollection(
                         new Dictionary<string, string?>
@@ -338,8 +348,6 @@ public class DistributedApplicationBuilder : IDistributedApplicationBuilder
             _innerBuilder.Services.AddSingleton<DcpExecutorEvents>();
             _innerBuilder.Services.AddSingleton<DcpHost>();
             _innerBuilder.Services.AddSingleton<IDcpDependencyCheckService, DcpDependencyCheck>();
-            _innerBuilder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<DcpOptions>, ConfigureDefaultDcpOptions>());
-            _innerBuilder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<DcpOptions>, ValidateDcpOptions>());
             _innerBuilder.Services.AddSingleton<DcpNameGenerator>();
 
             // We need a unique path per application instance
@@ -359,7 +367,12 @@ public class DistributedApplicationBuilder : IDistributedApplicationBuilder
 
         // Publishing support
         Eventing.Subscribe<BeforeStartEvent>(BuiltInDistributedApplicationEventSubscriptionHandlers.MutateHttp2TransportAsync);
-        _innerBuilder.Services.AddKeyedSingleton<IDistributedApplicationPublisher, ManifestPublisher>("manifest");
+        this.AddPublisher<ManifestPublisher, PublishingOptions>("manifest");
+        _innerBuilder.Services.AddKeyedSingleton<IContainerRuntime, DockerContainerRuntime>("docker");
+        _innerBuilder.Services.AddKeyedSingleton<IContainerRuntime, PodmanContainerRuntime>("podman");
+        _innerBuilder.Services.AddSingleton<IResourceContainerImageBuilder, ResourceContainerImageBuilder>();
+        _innerBuilder.Services.AddSingleton<PublishingActivityProgressReporter>();
+        _innerBuilder.Services.AddSingleton<IPublishingActivityProgressReporter, PublishingActivityProgressReporter>(sp => sp.GetRequiredService<PublishingActivityProgressReporter>());
 
         Eventing.Subscribe<BeforeStartEvent>(BuiltInDistributedApplicationEventSubscriptionHandlers.ExcludeDashboardFromManifestAsync);
 
@@ -433,7 +446,7 @@ public class DistributedApplicationBuilder : IDistributedApplicationBuilder
 
     private static bool IsDashboardUnsecured(IConfiguration configuration)
     {
-        return configuration.GetBool(KnownConfigNames.DashboardUnsecuredAllowAnonymous) ?? false;
+        return configuration.GetBool(KnownConfigNames.DashboardUnsecuredAllowAnonymous, KnownConfigNames.Legacy.DashboardUnsecuredAllowAnonymous) ?? false;
     }
 
     private void ConfigurePublishingOptions(DistributedApplicationOptions options)

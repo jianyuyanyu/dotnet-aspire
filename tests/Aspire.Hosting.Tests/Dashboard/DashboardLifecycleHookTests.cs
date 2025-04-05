@@ -17,9 +17,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Options;
 using Xunit;
-using Xunit.Abstractions;
 using Aspire.Hosting.Devcontainers;
-using Aspire.Hosting.Cli;
 
 namespace Aspire.Hosting.Tests.Dashboard;
 
@@ -111,14 +109,6 @@ public class DashboardLifecycleHookTests(ITestOutputHelper testOutputHelper)
         devcontainersOptions ??= Options.Create(new DevcontainersOptions());
         var settingsWriter = new DevcontainerSettingsWriter(NullLogger<DevcontainerSettingsWriter>.Instance, codespacesOptions, devcontainersOptions);
         var rewriter = new CodespacesUrlRewriter(codespacesOptions);
-        var cliBackchannel = new CliBackchannel(
-            NullLogger<CliBackchannel>.Instance,
-            configuration,
-            new AppHostRpcTarget(NullLogger<AppHostRpcTarget>.Instance),
-            resourceNotificationService,
-            null!, // We don't need the service provider for these tests.
-            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run)
-        );
 
         return new DashboardLifecycleHook(
             configuration,
@@ -134,8 +124,7 @@ public class DashboardLifecycleHookTests(ITestOutputHelper testOutputHelper)
             rewriter,
             codespacesOptions,
             devcontainersOptions,
-            settingsWriter,
-            cliBackchannel
+            settingsWriter
             );
     }
 

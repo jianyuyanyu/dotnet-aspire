@@ -1,9 +1,9 @@
 @description('The location for the resource(s) to be deployed.')
 param location string = resourceGroup().location
 
-param api_roles_outputs_id string
+param api_identity_outputs_id string
 
-param api_roles_outputs_clientid string
+param api_identity_outputs_clientid string
 
 param api_containerport string
 
@@ -12,16 +12,20 @@ param storage_outputs_blobendpoint string
 @secure()
 param cache_password_value string
 
-param infra_outputs_secret_output_account string
-
-param infra_outputs_azure_container_registry_managed_identity_id string
+param account_kv_outputs_name string
 
 @secure()
 param secretparam_value string
 
+param api_identity_outputs_principalname string
+
+param infra_outputs_azure_container_apps_environment_default_domain string
+
 param infra_outputs_azure_container_apps_environment_id string
 
 param infra_outputs_azure_container_registry_endpoint string
+
+param infra_outputs_azure_container_registry_managed_identity_id string
 
 param api_containerimage string
 
@@ -29,13 +33,13 @@ param certificateName string
 
 param customDomain string
 
-resource infra_outputs_secret_output_account_kv 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: infra_outputs_secret_output_account
+resource account_kv_outputs_name_kv 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: account_kv_outputs_name
 }
 
-resource infra_outputs_secret_output_account_kv_connectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
-  name: 'connectionString'
-  parent: infra_outputs_secret_output_account_kv
+resource account_kv_outputs_name_kv_connectionstrings__account 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
+  name: 'connectionstrings--account'
+  parent: account_kv_outputs_name_kv
 }
 
 resource api 'Microsoft.App/containerApps@2024-03-01' = {
@@ -50,8 +54,8 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
         }
         {
           name: 'connectionstrings--account'
-          identity: infra_outputs_azure_container_registry_managed_identity_id
-          keyVaultUrl: infra_outputs_secret_output_account_kv_connectionString.properties.secretUri
+          identity: api_identity_outputs_id
+          keyVaultUrl: account_kv_outputs_name_kv_connectionstrings__account.properties.secretUri
         }
         {
           name: 'value'
@@ -122,8 +126,12 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               secretRef: 'value'
             }
             {
+              name: 'AZURE_PRINCIPAL_NAME'
+              value: api_identity_outputs_principalname
+            }
+            {
               name: 'AZURE_CLIENT_ID'
-              value: api_roles_outputs_clientid
+              value: api_identity_outputs_clientid
             }
           ]
         }
@@ -136,7 +144,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
-      '${api_roles_outputs_id}': { }
+      '${api_identity_outputs_id}': { }
       '${infra_outputs_azure_container_registry_managed_identity_id}': { }
     }
   }

@@ -19,14 +19,10 @@
     <_DotNetToolJsonPath>$(RepoRoot).config/dotnet-tools.json</_DotNetToolJsonPath>
     <_DotNetToolJsonContent>$([System.IO.File]::ReadAllText($(_DotNetToolJsonPath)))</_DotNetToolJsonContent>
 
-    <_CreateDotNetDevCertsDirectory>$(ArtifactsObjDir)create-dotnet-devcert</_CreateDotNetDevCertsDirectory>
-
     <_AzureFunctionsCliUrl Condition="'$(OS)' == 'Windows_NT'">https://github.com/Azure/azure-functions-core-tools/releases/download/4.0.6280/Azure.Functions.Cli.min.win-x64_net8.4.0.6280.zip</_AzureFunctionsCliUrl>
     <_AzureFunctionsCliUrl Condition="'$(OS)' != 'Windows_NT'">https://github.com/Azure/azure-functions-core-tools/releases/download/4.0.6280/Azure.Functions.Cli.linux-x64_net8.4.0.6280.zip</_AzureFunctionsCliUrl>
 
     <_DefaultSdkDirNameForTests>dotnet-tests</_DefaultSdkDirNameForTests>
-
-    <PrepareDependenciesDependsOn>_StageCreateDotNetDevCertScripts</PrepareDependenciesDependsOn>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -57,6 +53,8 @@
     <_WaitForDcpCommand Condition="'$(OS)' != 'Windows_NT'">echo "Waiting for dcp process to exit..."; start_time=$(date +%s); echo "Start time: $start_time"; timeout=120; while pgrep -lf "dcp.exe" &gt; /dev/null &amp;&amp; [ $timeout -gt 0 ]; do sleep 1; timeout=$((timeout - 1)); done; end_time=$(date +%s); echo "End time: $end_time"; if pgrep -lf "dcp.exe" &gt; /dev/null; then echo "dcp process did not exit within the timeout period."; exit 1; fi</_WaitForDcpCommand>
     <!-- Figure out the powershell... -->
     <_WaitForDcpCommand Condition="'$(OS)' == 'Windows_NT'"></_WaitForDcpCommand>
+
+    <_SetExecutableBitCommand Condition="'$(OS)' != 'Windows_NT'">chmod +x $(_TestNameEnvVar) $(_ShellCommandSeparator) </_SetExecutableBitCommand>
   </PropertyGroup>
 
   <ItemGroup>
@@ -66,7 +64,7 @@
     <_TestBlameArguments Include="--blame-crash" />
     <_TestBlameArguments Include="--blame-crash-dump-type full" />
 
-    <_TestRunCommandArguments Include="dotnet test -s .runsettings $(_TestNameEnvVar).dll --ResultsDirectory:$(_HelixLogsPath) -v:n" />
+    <_TestRunCommandArguments Include="$(_SetExecutableBitCommand)dotnet test -s .runsettings $(_TestNameEnvVar).dll --ResultsDirectory:$(_HelixLogsPath) -v:n" />
     <_TestRunCommandArguments Include="@(_TestBlameArguments, ' ')" />
   </ItemGroup>
 
@@ -86,13 +84,13 @@
     <HelixPreCommand Condition="'$(OS)' != 'Windows_NT'" Include="export PLAYWRIGHT_BROWSERS_PATH=$HELIX_CORRELATION_PAYLOAD/playwright-deps" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(NeedsWorkload)' == 'true'">
+  <ItemGroup Condition="'$(NeedsSdksForTesting)' == 'true'">
     <!-- set path to dotnet-tests early, so any dotnet commands can run -->
     <HelixPreCommand Condition="'$(OS)' == 'Windows_NT'" Include="set PATH=%HELIX_CORRELATION_PAYLOAD%\$(_DefaultSdkDirNameForTests)%3B%PATH%" />
     <HelixPreCommand Condition="'$(OS)' != 'Windows_NT'" Include="export PATH=$HELIX_CORRELATION_PAYLOAD/$(_DefaultSdkDirNameForTests):$PATH" />
 
-    <HelixPreCommand Condition="'$(OS)' == 'Windows_NT'" Include="set SDK_FOR_WORKLOAD_TESTING_PATH=%HELIX_CORRELATION_PAYLOAD%\$(_DefaultSdkDirNameForTests)" />
-    <HelixPreCommand Condition="'$(OS)' != 'Windows_NT'" Include="export SDK_FOR_WORKLOAD_TESTING_PATH=$HELIX_CORRELATION_PAYLOAD/$(_DefaultSdkDirNameForTests)" />
+    <HelixPreCommand Condition="'$(OS)' == 'Windows_NT'" Include="set SDK_FOR_TEMPLATES_TESTING_PATH=%HELIX_CORRELATION_PAYLOAD%\$(_DefaultSdkDirNameForTests)" />
+    <HelixPreCommand Condition="'$(OS)' != 'Windows_NT'" Include="export SDK_FOR_TEMPLATES_TESTING_PATH=$HELIX_CORRELATION_PAYLOAD/$(_DefaultSdkDirNameForTests)" />
 
     <!-- needed till the 9.0 sdk drops the aspire manifest -->
     <HelixPreCommand Include="$(_EnvVarSetKeyword) SkipAspireWorkloadManifest=true" />
@@ -151,7 +149,7 @@
     <HelixPostCommand Include="$(_WaitForDcpCommand)" />
   </ItemGroup>
 
-  <PropertyGroup Condition="'$(NeedsWorkload)' == 'true'">
+  <PropertyGroup Condition="'$(NeedsSdksForTesting)' == 'true'">
     <!-- Set this here so if dotnet-cli is overriding the path, then dotnet-tests overrides that and gets precedence -->
     <HelixPerWorkItemPreCommand Condition="'$(OS)' == 'Windows_NT'">set PATH=%HELIX_CORRELATION_PAYLOAD%\$(_DefaultSdkDirNameForTests)%3B%PATH%</HelixPerWorkItemPreCommand>
     <HelixPerWorkItemPreCommand Condition="'$(OS)' != 'Windows_NT'">export PATH=$HELIX_CORRELATION_PAYLOAD/$(_DefaultSdkDirNameForTests):$PATH</HelixPerWorkItemPreCommand>
@@ -161,11 +159,6 @@
   </PropertyGroup>
 
   <Target Name="PrepareDependencies" DependsOnTargets="$(PrepareDependenciesDependsOn)" />
-
-  <Target Name="_StageCreateDotNetDevCertScripts" Condition="'$(NeedsCreateDotNetDevScripts)' == 'true' and '$(OS)' != 'Windows_NT' and !Exists($(_CreateDotNetDevCertsDirectory))">
-    <DownloadFile SourceUrl="https://raw.githubusercontent.com/BorisWilhelms/create-dotnet-devcert/main/scripts/ubuntu-create-dotnet-devcert.sh" DestinationFolder="$(_CreateDotNetDevCertsDirectory)" />
-    <DownloadFile SourceUrl="https://raw.githubusercontent.com/BorisWilhelms/create-dotnet-devcert/main/scripts/common.sh" DestinationFolder="$(_CreateDotNetDevCertsDirectory)" />
-  </Target>
 
   <Target Name="BuildHelixWorkItems" DependsOnTargets="$(BuildHelixWorkItemsDependsOn)" BeforeTargets="Build">
     <MSBuild Projects="$(RepoRoot)\eng\dcppack\Aspire.Hosting.Orchestration.$(NETCoreSdkRuntimeIdentifier).csproj" Targets="GetDCPBinaryLocation">
@@ -185,11 +178,11 @@
     </PropertyGroup>
 
     <ItemGroup Label="Common payload">
-      <HelixCorrelationPayload Condition="'$(NeedsCreateDotNetDevScripts)' == 'true'" Include="$(_CreateDotNetDevCertsDirectory)" Destination="create-dotnet-devcert" />
+      <HelixCorrelationPayload Condition="'$(NeedsCreateDotNetDevScripts)' == 'true'" Include="$(RepoRoot)tests\external-scripts" Destination="create-dotnet-devcert" />
       <HelixCorrelationPayload Condition="'$(DockerCliToolDir)' != ''" Include="$(DockerCliToolDir)" Destination="docker-cli" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(NeedsWorkload)' == 'true'">
+    <ItemGroup Condition="'$(NeedsSdksForTesting)' == 'true'">
       <HelixCorrelationPayload Include="$(ArtifactsBinDir)$(_DefaultSdkDirNameForTests)" Destination="$(_DefaultSdkDirNameForTests)" />
       <HelixCorrelationPayload Include="$(ArtifactsShippingPackagesDir)" Destination="built-nugets" />
     </ItemGroup>
